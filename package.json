@@ -1,0 +1,40 @@
+{
+  "name": "packetpal",
+  "productName": "PacketPal",
+  "version": "1.0.0",
+  "description": "A beginner-friendly window into your network — a friendly face over Wireshark's capture engine.",
+  "author": "Aadhaar <aadhaarkoul2002@gmail.com>",
+  "license": "MIT",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac dmg"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.aadhaar.packetpal",
+    "productName": "PacketPal",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "build/icon.*"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        { "target": "dmg", "arch": ["arm64"] }
+      ],
+      "icon": "build/icon.png",
+      "identity": null
+    },
+    "dmg": {
+      "title": "PacketPal ${version}"
+    }
+  }
+}

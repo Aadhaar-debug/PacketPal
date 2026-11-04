@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self';" />
+  <title>PacketPal</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="titlebar"></div>
+
+  <div id="app">
+    <!-- Sidebar -->
+    <aside id="sidebar">
+      <div class="brand">
+        <div class="logo">🐾</div>
+        <div>
+          <div class="brand-name">PacketPal</div>
+          <div class="brand-tag">Your network, in plain English</div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Network to watch</label>
+        <select id="iface"><option>Loading…</option></select>
+      </div>
+
+      <button id="captureBtn" class="capture-btn" disabled>Start watching</button>
+      <div id="captureHint" class="hint">Pick a network and press start.</div>
+
+      <div class="stats">
+        <div class="stat"><div class="stat-num" id="statPackets">0</div><div class="stat-label">packets seen</div></div>
+        <div class="stat"><div class="stat-num" id="statData">0 KB</div><div class="stat-label">data</div></div>
+        <div class="stat"><div class="stat-num" id="statTime">0s</div><div class="stat-label">watching</div></div>
+      </div>
+
+      <div class="sidebar-foot">
+        <div id="engineStatus" class="engine">checking engine…</div>
+        <div class="disclaimer">Only watch networks you own or are allowed to test.</div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main id="main">
+      <!-- Permission / install banner -->
+      <div id="banner" class="banner hidden"></div>
+
+      <!-- Tab cards -->
+      <section id="cards" class="cards">
+        <button class="card active" data-tab="devices">
+          <span class="card-ico">👥</span>
+          <span class="card-num" id="cnt-devices">0</span>
+          <span class="card-name">Devices &amp; Users</span>
+        </button>
+        <button class="card" data-tab="credentials">
+          <span class="card-ico">🔑</span>
+          <span class="card-num" id="cnt-credentials">0</span>
+          <span class="card-name">Exposed Logins</span>
+        </button>
+        <button class="card" data-tab="anomalies">
+          <span class="card-ico">⚠️</span>
+          <span class="card-num" id="cnt-anomalies">0</span>
+          <span class="card-name">Anomalies</span>
+        </button>
+        <button class="card" data-tab="media">
+          <span class="card-ico">🖼️</span>
+          <span class="card-num" id="cnt-media">0</span>
+          <span class="card-name">Photos &amp; Video</span>
+        </button>
+        <button class="card" data-tab="services">
+          <span class="card-ico">🚪</span>
+          <span class="card-num" id="cnt-services">0</span>
+          <span class="card-name">Open Doors</span>
+        </button>
+        <button class="card" data-tab="traffic">
+          <span class="card-ico">🌐</span>
+          <span class="card-num" id="cnt-traffic">0</span>
+          <span class="card-name">All Traffic</span>
+        </button>
+      </section>
+
+      <!-- Panels -->
+      <section id="panels" class="panels">
+        <div class="panel active" data-panel="devices">
+          <div class="explain" id="exp-devices"></div>
+          <div id="list-devices" class="list"></div>
+        </div>
+        <div class="panel" data-panel="credentials">
+          <div class="explain" id="exp-credentials"></div>
+          <div id="list-credentials" class="list"></div>
+        </div>
+        <div class="panel" data-panel="anomalies">
+          <div class="explain" id="exp-anomalies"></div>
+          <div id="list-anomalies" class="list"></div>
+        </div>
+        <div class="panel" data-panel="media">
+          <div class="explain" id="exp-media"></div>
+          <div id="list-media" class="list"></div>
+        </div>
+        <div class="panel" data-panel="services">
+          <div class="explain" id="exp-services"></div>
+          <div id="list-services" class="list"></div>
+        </div>
+        <div class="panel" data-panel="traffic">
+          <div class="explain" id="exp-traffic"></div>
+          <div class="filters-wrap">
+            <div class="filters-label">Filter the traffic — these buttons appear as PacketPal discovers things:</div>
+            <div id="filters" class="filters"></div>
+          </div>
+          <div id="list-traffic" class="traffic-table"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="catalog.js"></script>
+  <script src="analyzers.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
