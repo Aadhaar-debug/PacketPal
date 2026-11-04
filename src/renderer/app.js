@@ -16,12 +16,12 @@ const esc = (s) => String(s == null ? '' : s)
 
 // Plain-English intros for each tab.
 const EXPLAIN = {
-  devices: '<b>Who is on your network?</b> Every gadget — phones, laptops, TVs, smart bulbs — shows up here the moment it talks. We guess the maker from its hardware address and learn its name when the network announces it.',
+  devices: '<b>Who is on your network?</b> Every gadget — phones, laptops, TVs, smart bulbs — shows up here the moment it talks. PacketPal names each one from its maker (hardware address), the name it announces, and how it behaves (e.g. a device chatting with Apple’s servers is likely an Apple device). Modern phones hide behind a <b>random MAC</b>, so some show up as “private”.',
   credentials: '<b>Is anything leaking your logins?</b> Secure sites (HTTPS) hide your passwords. Old or misconfigured services (plain HTTP, FTP, Telnet, old email) send them <b>in the clear</b>, where anyone on the network can read them. PacketPal flags these exposures so you can fix them — it does <b>not</b> store the actual passwords.',
   anomalies: '<b>Anything suspicious?</b> PacketPal watches for tell-tale attack patterns — a device scanning lots of ports (hunting for open doors), or two devices fighting over one address (a classic man-in-the-middle trick).',
   media: '<b>Pictures &amp; video crossing the wire.</b> When a device loads an image or video over an <b>unencrypted</b> connection, it is visible on the network. This shows what was sent and by whom. (Encrypted sites — most of the web — stay private and will not appear here.)',
-  services: '<b>Open doors on your devices.</b> A “port” is a door into a device. When PacketPal sees a device answer a knock, it knows that door is open and lists what service is likely behind it. Unexpected open doors are worth a closer look.',
-  traffic: '<b>Everything, as it happens.</b> This is the raw feed in friendly language. Use the buttons below to zero in — they appear automatically as PacketPal discovers new kinds of traffic.',
+  services: '<b>Open doors & services.</b> A “port” is a door into a device. <b>Open doors</b> are services your own devices are listening on (worth checking they’re meant to be open). <b>Services in use</b> shows what your network is reaching out to — web, DNS, email, video — so you can see the kinds of activity happening.',
+  traffic: '<b>Everything, as it happens.</b> This is the raw feed in friendly language. Use the buttons below to zero in — they appear automatically as PacketPal discovers traffic, including <b>one button per device</b> so you can watch a single phone or laptop.',
 };
 
 // ---------- boot ----------
@@ -178,19 +178,38 @@ function emptyState(icon, text) {
 function renderDevices(s) {
   const el = $('list-devices');
   if (!s.devices.length) { el.innerHTML = emptyState('👀', capturing ? 'Listening… devices will pop up as they talk.' : 'Press <b>Start watching</b> to discover devices.'); return; }
-  el.innerHTML = s.devices.map((d) => {
-    const name = d.hostname || d.vendor || (d.local ? 'Local device' : 'Internet server');
-    const ico = d.local ? '💻' : '☁️';
-    return `<div class="row">
-      <div class="av">${ico}</div>
-      <div class="main">
-        <div class="title">${esc(name)}
-          <span class="badge ${d.local ? 'local' : 'ext'}">${d.local ? 'on your network' : 'internet'}</span></div>
-        <div class="sub mono">${esc(d.ip)}${d.mac ? ' · ' + esc(d.mac) : ''}${d.vendor ? ' · ' + esc(d.vendor) : ''}</div>
-      </div>
-      <div class="meta">${fmt(d.packets)} pkts<br>${humanBytes(d.bytes)}</div>
-    </div>`;
-  }).join('');
+  const locals = s.devices.filter((d) => d.local);
+  const externals = s.devices.filter((d) => !d.local);
+  let html = `<div class="section-head">📡 ${fmt(locals.length)} device${locals.length === 1 ? '' : 's'} on your network</div>`;
+  html += locals.map((d) => deviceRow(d, true)).join('');
+  if (externals.length) {
+    html += `<div class="section-head muted-head">☁️ ${fmt(externals.length)} internet server${externals.length === 1 ? '' : 's'} they talked to</div>`;
+    html += externals.slice(0, 40).map((d) => deviceRow(d, false)).join('');
+  }
+  el.innerHTML = html;
+}
+
+function deviceRow(d, isLocal) {
+  const details = [];
+  details.push(d.ip + (d.addresses > 1 ? ` +${d.addresses - 1} addr` : ''));
+  if (isLocal && d.mac) details.push(d.privateMac ? d.mac + ' (private)' : d.mac);
+  if (d.vendor && !d.name.toLowerCase().includes(d.vendor.toLowerCase())) details.push(d.vendor);
+  if (d.hostname && !d.name.includes(d.hostname)) details.push('“' + d.hostname + '”');
+  const svc = d.services && d.services.length ? `<div class="sub">Uses: ${esc(d.services.join(', '))}</div>` : '';
+  const dataLine = isLocal
+    ? `↑ ${humanBytes(d.bytesOut)} · ↓ ${humanBytes(d.bytesIn)}`
+    : humanBytes(d.bytes);
+  return `<div class="row">
+    <div class="av">${d.icon || '🔌'}</div>
+    <div class="main">
+      <div class="title">${esc(d.name)}
+        ${isLocal ? `<span class="badge local">on your network</span>` : `<span class="badge ext">internet</span>`}
+        ${d.privateMac && isLocal ? '<span class="badge ext">random MAC</span>' : ''}</div>
+      <div class="sub mono">${esc(details.join(' · '))}</div>
+      ${svc}
+    </div>
+    <div class="meta">${fmt(d.packets)} pkts<br>${dataLine}${isLocal && d.peers ? '<br>' + fmt(d.peers) + ' connections' : ''}</div>
+  </div>`;
 }
 
 function renderCredentials(s) {
@@ -234,8 +253,14 @@ function renderMedia(s) {
 
 function renderServices(s) {
   const el = $('list-services');
-  if (!s.services.length) { el.innerHTML = emptyState('🚪', 'No open doors seen yet. They appear when a device answers a connection.'); return; }
-  el.innerHTML = s.services.map((sv) => `<div class="row">
+  if (!s.services.length && !s.servicesInUse.length) {
+    el.innerHTML = emptyState('🚪', capturing ? 'Watching for services… they appear as devices connect.' : 'Press start to discover services and open ports.');
+    return;
+  }
+  let html = '';
+  if (s.services.length) {
+    html += `<div class="section-head">🚪 Open doors (devices listening for connections)</div>`;
+    html += s.services.map((sv) => `<div class="row">
       <div class="av">🚪</div>
       <div class="main">
         <div class="title">${esc(sv.service)}
@@ -243,6 +268,19 @@ function renderServices(s) {
         <div class="sub mono">${esc(sv.ip)} · port ${esc(sv.port)}</div>
       </div>
     </div>`).join('');
+  }
+  if (s.servicesInUse.length) {
+    html += `<div class="section-head">🔌 Services your network is using</div>`;
+    html += s.servicesInUse.map((sv) => `<div class="row">
+      <div class="av">🔌</div>
+      <div class="main">
+        <div class="title">${esc(sv.service)}</div>
+        <div class="sub mono">port ${esc(sv.port)}</div>
+      </div>
+      <div class="meta">${fmt(sv.count)}×</div>
+    </div>`).join('');
+  }
+  el.innerHTML = html;
 }
 
 // ---- dynamic filter buttons + traffic table ----
@@ -261,6 +299,7 @@ function matchFilter(r) {
   if (activeFilter.type === 'tag') return r.tags.includes(activeFilter.value);
   if (activeFilter.type === 'proto') return r.proto === activeFilter.value;
   if (activeFilter.type === 'host') return (r.info || '').indexOf(activeFilter.value) >= 0 || r.dst === activeFilter.value;
+  if (activeFilter.type === 'device') return r.smac === activeFilter.value || r.dmac === activeFilter.value;
   return true;
 }
 
@@ -295,6 +334,11 @@ function renderFilters(s) {
     const type = f.key === 'all' ? 'all' : 'tag';
     const n = f.key === 'all' ? store.packets.length : (counts[f.key] || 0);
     chips.push(chip(f.label, type, f.key, n));
+  }
+  // one filter button per identified device on the network (auto-generated)
+  for (const d of s.namedLocal.slice(0, 12)) {
+    if (!d.mac) continue;
+    chips.push(chip(`${d.icon} ${d.name}`, 'device', d.mac, d.packets));
   }
   // protocol chips (auto-generated from what has been seen)
   for (const [proto, n] of s.topProtocols.slice(0, 8)) {

@@ -10,6 +10,8 @@ const FIELDS = [
   'frame.protocols',
   'eth.src',
   'eth.dst',
+  'eth.src.oui_resolved',
+  'eth.dst.oui_resolved',
   'ip.src',
   'ip.dst',
   'ipv6.src',
@@ -40,6 +42,7 @@ const FIELDS = [
   'arp.opcode',
   'arp.dst.proto_ipv4',
   'dhcp.option.hostname',
+  'dhcp.option.vendor_class_id',
   'nbns.name',
 ];
 

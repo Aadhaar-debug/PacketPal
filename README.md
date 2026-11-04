@@ -15,12 +15,12 @@ sees into friendly, self-updating tabs — each with a live counter.
 
 | Tab | What it watches for |
 | --- | --- |
-| 👥 **Devices & Users** | Every gadget on the network — phone, laptop, TV, smart bulb — with a best-guess maker and name. |
+| 👥 **Devices & Users** | Every gadget on the network, **named** — "iPhone", "Samsung TV", "Raspberry Pi" — from its maker (tshark's IEEE database), the name it announces, and how it behaves. Deduplicated by hardware address (one device = one entry, even with IPv4 + IPv6), with data sent/received and how many connections each has. |
 | 🔑 **Exposed Logins** | Services that send credentials **without encryption** (plain HTTP, FTP, Telnet, old email). A defensive alarm so you can fix them. *PacketPal flags the exposure but never stores the actual passwords.* |
 | ⚠️ **Anomalies** | Attack-shaped patterns: port scans (someone hunting for open doors) and ARP spoofing (a classic man-in-the-middle trick). |
 | 🖼️ **Photos & Video** | Images and video crossing the wire **unencrypted**. (Encrypted sites stay private and won't appear.) |
 | 🚪 **Open Doors** | Open ports / listening services on your devices, with a plain-language name for each. |
-| 🌐 **All Traffic** | The full live feed in friendly language, with **filter buttons that generate themselves** as new kinds of traffic appear. |
+| 🌐 **All Traffic** | The full live feed in friendly language, with **filter buttons that generate themselves** as new traffic appears — including **one button per identified device**, so you can watch a single phone or laptop. |
 
 ## Responsible use
 

@@ -89,7 +89,8 @@ class CaptureSession extends EventEmitter {
     const args = [
       '-i', this.iface,
       '-l',            // flush stdout after each packet (live)
-      '-n',            // no name resolution (fast, no extra DNS)
+      '-n',            // no DNS/host name resolution (fast)
+      '-N', 'm',       // ...but DO resolve MAC vendors from tshark's IEEE database
       '-T', 'fields',
       '-E', 'separator=/t',
       '-E', 'occurrence=f',
