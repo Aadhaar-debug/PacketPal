@@ -24,6 +24,8 @@ const FIELDS = [
   'udp.srcport',
   'udp.dstport',
   'dns.qry.name',
+  'dns.a',
+  'dns.aaaa',
   'http.host',
   'http.request.method',
   'http.request.uri',

@@ -16,11 +16,11 @@ sees into friendly, self-updating tabs — each with a live counter.
 | Tab | What it watches for |
 | --- | --- |
 | 👥 **Devices & Users** | Every gadget on the network, **named** — "iPhone", "Samsung TV", "Raspberry Pi" — from its maker (tshark's IEEE database), the name it announces, and how it behaves. Deduplicated by hardware address (one device = one entry, even with IPv4 + IPv6), with data sent/received and how many connections each has. |
-| 🔑 **Exposed Logins** | Services that send credentials **without encryption** (plain HTTP, FTP, Telnet, old email). A defensive alarm so you can fix them. *PacketPal flags the exposure but never stores the actual passwords.* |
-| ⚠️ **Anomalies** | Attack-shaped patterns: port scans (someone hunting for open doors) and ARP spoofing (a classic man-in-the-middle trick). |
+| 🔑 **Logins** | **All** login-related activity: login pages opened, secure login services connected to (🔒 HTTPS), and any credentials seen. Anything **unencrypted** (🔓 plain HTTP, FTP, Telnet, old email) is flagged as risky. *Passwords are flagged but never stored.* |
+| ⚠️ **Anomalies** | Anything that shouldn't happen on a home network: unencrypted web pages, insecure protocols (Telnet/FTP), risky services exposed to the internet (SMB/RDP/VNC), port scans, and ARP spoofing — colour-coded by severity. |
 | 🖼️ **Photos & Video** | Images and video crossing the wire **unencrypted**. (Encrypted sites stay private and won't appear.) |
 | 🚪 **Open Doors** | Open ports / listening services on your devices, with a plain-language name for each. |
-| 🌐 **All Traffic** | The full live feed in friendly language, with **filter buttons that generate themselves** as new traffic appears — including **one button per identified device**, so you can watch a single phone or laptop. |
+| 🌐 **All Traffic** | The full live feed in friendly language. Every source and destination IP is **labelled with its domain name** (learned from DNS/HTTPS) so you see *who* each IP is, not just a number. **Filter buttons generate themselves** as traffic appears — including **one button per identified device**. |
 
 ## Responsible use
 

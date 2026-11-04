@@ -90,20 +90,30 @@
       this.lastTime = null;
 
       this.devices = new Map();
-      this.credentials = [];
+      this.logins = [];              // ALL login-related activity (pages, services, creds)
       this.anomalies = [];
       this.media = [];
       this.services = new Map();      // listening ports: ip:port -> {..}
       this.servicePorts = new Map();  // service-in-use: port -> {count, service}
 
+      this.ipNames = new Map();       // ip -> domain name (learned from DNS / SNI / Host)
+      this._localName = new Map();    // ip -> local device name (rebuilt each snapshot)
       this.protoCounts = new Map();
       this.hostCounts = new Map();
 
       this._scan = new Map();
       this._arp = new Map();
       this._arpFlagged = new Set();
-      this._credSeen = new Set();
+      this._loginSeen = new Set();
       this._mediaSeen = new Set();
+      this._anomSeen = new Set();
+    }
+
+    _learnName(ip, name) {
+      if (!ip || !name) return;
+      name = name.replace(/\.$/, '').trim();
+      if (!name || isPrivateIP(ip) || isNoise(ip)) return;
+      if (!this.ipNames.has(ip)) this.ipNames.set(ip, name);
     }
 
     _touchDevice(ip, mac, t, vendorResolved) {
@@ -186,25 +196,29 @@
           info = 'Looked up: ' + q;
           tags.push('dns');
           this._bump(this.hostCounts, q);
+          // map every resolved IP back to this name (powers src/dst labels)
+          const addrs = ((p['dns.a'] || '') + ',' + (p['dns.aaaa'] || '')).split(',');
+          for (const a of addrs) this._learnName(a.trim(), q);
         }
       }
 
       const sni = p['tls.handshake.extensions_server_name'];
-      if (sni) { info = 'Secure connection to ' + sni; tags.push('secure'); this._bump(this.hostCounts, sni); }
+      if (sni) { info = 'Secure connection to ' + sni; tags.push('secure'); this._bump(this.hostCounts, sni); this._learnName(dstIP, sni); }
 
       if (p['http.host'] || p['http.request.method'] || p['http.content_type']) {
         tags.push('web', 'insecure-plain');
         if (p['http.request.method']) info = p['http.request.method'] + ' ' + (p['http.host'] || '') + (p['http.request.uri'] || '');
         else if (p['http.host']) info = 'HTTP ' + p['http.host'];
-        if (p['http.host']) this._bump(this.hostCounts, p['http.host']);
+        if (p['http.host']) { this._bump(this.hostCounts, p['http.host']); this._learnName(dstIP, p['http.host']); }
       }
 
       this._detectMedia(p, t, srcIP, tags);
-      this._detectCredentials(p, t, srcIP, dstIP, tags);
+      this._detectLogins(p, t, srcIP, dstIP, proto, tags);
       this._detectService(p, srcIP, sPort);
       this._trackServiceUse(dPort, srcDev);
       this._detectPortScan(p, t, srcIP, dstIP, dPort);
       this._detectArp(p, t);
+      this._detectRiskyTraffic(p, t, srcIP, dstIP, dPort, proto, tags);
 
       if (proto === 'arp' && !info) {
         info = p['arp.opcode'] === '1'
@@ -250,25 +264,78 @@
       this._pushCapped(this.media, { t, kind, contentType: ct || ('(' + kind + ' by file type)'), host, uri: p['http.request.uri'] || '', src: srcIP });
     }
 
-    _detectCredentials(p, t, srcIP, dstIP, tags) {
+    _addAnomaly(key, obj) {
+      if (this._anomSeen.has(key)) return;
+      this._anomSeen.add(key);
+      this._pushCapped(this.anomalies, obj);
+    }
+
+    // ALL login-related activity: pages visited, login services, and any
+    // credentials seen (passwords are flagged but never stored).
+    _detectLogins(p, t, srcIP, dstIP, proto, tags) {
+      const pathRe = /login|signin|sign[-_]?in|logon|log[-_]?in|\bauth\b|oauth|openid|\bsso\b|session|account|signup|sign[-_]?up|password|passwd|credential|\btoken\b|logout/i;
+      const hostRe = /(^|\.)(login|signin|sign-in|auth|accounts?|sso|oauth|idp|logon|secure|signin)\.|accounts\.google|login\.(microsoftonline|live|yahoo)|appleid\.apple|\.okta\.com|auth0\.com|onelogin\.com|duosecurity/i;
+
       const push = (ev) => {
-        const key = ev.protocol + '|' + srcIP + '|' + dstIP + '|' + (ev.username || '') + '|' + ev.kind;
-        if (this._credSeen.has(key)) return;
-        this._credSeen.add(key);
-        tags.push('exposed-login');
-        this._pushCapped(this.credentials, ev);
+        const key = ev.category + '|' + ev.protocol + '|' + (ev.host || dstIP) + '|' + (ev.path || '') + '|' + (ev.username || '');
+        if (this._loginSeen.has(key)) return;
+        this._loginSeen.add(key);
+        tags.push('login');
+        if (!ev.secure) tags.push('exposed-login');
+        this._pushCapped(this.logins, ev);
       };
+
+      const host = p['http.host'] || '';
+      const uri = p['http.request.uri'] || '';
+      const method = p['http.request.method'] || '';
+
+      // 1) Cleartext credentials (insecure) — password values are never stored.
       if (p['http.authorization']) {
         const user = decodeBasicUser(p['http.authorization']);
-        push({ t, protocol: 'HTTP', kind: 'auth-header',
-          endpoints: `${srcIP} → ${dstIP}${p['http.host'] ? ' (' + p['http.host'] + ')' : ''}`,
-          username: user, summary: 'Login sent over unencrypted HTTP' + (user ? ` for user “${user}”` : '') });
+        push({ t, protocol: 'HTTP', secure: false, category: 'cleartext', host, path: uri, username: user, severity: 'high',
+          summary: 'Credentials sent over unencrypted HTTP' + (user ? ` (user “${user}”)` : '') });
+        this._addAnomaly('cred|' + srcIP + '|' + host, { t, type: 'cleartext-cred', severity: 'high', title: 'Password sent without encryption',
+          detail: `A login on ${host || dstIP} was sent over plain HTTP, readable by anyone on the network. Use HTTPS instead.` });
       }
-      if (p['ftp.request.command'] === 'USER') push({ t, protocol: 'FTP', kind: 'ftp-user', endpoints: `${srcIP} → ${dstIP}`, username: p['ftp.request.arg'] || '', summary: `FTP username “${p['ftp.request.arg'] || ''}” sent in cleartext` });
-      if (p['ftp.request.command'] === 'PASS') push({ t, protocol: 'FTP', kind: 'ftp-pass', endpoints: `${srcIP} → ${dstIP}`, username: '', summary: 'FTP password sent in cleartext (value hidden by PacketPal)' });
-      if (p['telnet.data']) push({ t, protocol: 'Telnet', kind: 'telnet', endpoints: `${srcIP} → ${dstIP}`, username: '', summary: 'Telnet session is fully unencrypted — anything typed is visible' });
-      if (p['pop.request.command'] && /user|pass/i.test(p['pop.request.command'])) push({ t, protocol: 'POP3', kind: 'pop', endpoints: `${srcIP} → ${dstIP}`, username: '', summary: 'Email (POP3) login sent without encryption' });
-      if (p['imap.request'] && /login/i.test(p['imap.request'])) push({ t, protocol: 'IMAP', kind: 'imap', endpoints: `${srcIP} → ${dstIP}`, username: '', summary: 'Email (IMAP) login sent without encryption' });
+      if (p['ftp.request.command'] === 'USER') push({ t, protocol: 'FTP', secure: false, category: 'cleartext', host: dstIP, username: p['ftp.request.arg'] || '', severity: 'high', summary: `FTP username “${p['ftp.request.arg'] || ''}” sent in cleartext` });
+      if (p['ftp.request.command'] === 'PASS') { push({ t, protocol: 'FTP', secure: false, category: 'cleartext', host: dstIP, username: '', severity: 'high', summary: 'FTP password sent in cleartext (value hidden)' }); this._addAnomaly('ftp|' + srcIP + '|' + dstIP, { t, type: 'cleartext-cred', severity: 'high', title: 'FTP password sent without encryption', detail: `An FTP login to ${dstIP} was sent in the clear. FTP has no encryption — avoid it or switch to SFTP.` }); }
+      if (p['telnet.data']) push({ t, protocol: 'Telnet', secure: false, category: 'cleartext', host: dstIP, username: '', severity: 'high', summary: 'Telnet login — the whole session is unencrypted' });
+      if (p['pop.request.command'] && /user|pass/i.test(p['pop.request.command'])) push({ t, protocol: 'POP3', secure: false, category: 'cleartext', host: dstIP, username: '', severity: 'high', summary: 'Email (POP3) login sent without encryption' });
+      if (p['imap.request'] && /login/i.test(p['imap.request'])) push({ t, protocol: 'IMAP', secure: false, category: 'cleartext', host: dstIP, username: '', severity: 'high', summary: 'Email (IMAP) login sent without encryption' });
+
+      // 2) HTTP login pages / submissions (unencrypted, so page + path visible)
+      if (host || uri) {
+        if (method === 'POST' && (pathRe.test(uri) || hostRe.test(host))) {
+          push({ t, protocol: 'HTTP', secure: false, category: 'submit', host, path: uri, severity: 'high', summary: `Login submitted (unencrypted) to ${host}${uri}` });
+        } else if (method === 'GET' && (pathRe.test(uri) || hostRe.test(host))) {
+          push({ t, protocol: 'HTTP', secure: false, category: 'page', host, path: uri, severity: 'medium', summary: `Login page opened (unencrypted): ${host}${uri}` });
+        }
+      }
+
+      // 3) Secure login services (HTTPS) — we see the site name, not the password
+      const sni = p['tls.handshake.extensions_server_name'];
+      if (sni && hostRe.test(sni)) {
+        push({ t, protocol: 'HTTPS', secure: true, category: 'service', host: sni, path: '', severity: 'info', summary: `Signed in to a secure service: ${sni}` });
+      }
+    }
+
+    // Things that shouldn't really happen on a safe home network.
+    _detectRiskyTraffic(p, t, srcIP, dstIP, dPort, proto, tags) {
+      // (a) a website loaded over plain, unencrypted HTTP
+      const host = p['http.host'] || '';
+      const uri = p['http.request.uri'] || '';
+      if (p['http.request.method'] === 'GET' && host && !/\.(js|css|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|mp4|m3u8|ts|map|json|xml)(\?|$)/i.test(uri)) {
+        this._addAnomaly('http|' + host, { t, type: 'http-plaintext', severity: 'low', title: 'Website opened without encryption',
+          detail: `${srcIP} loaded ${host} over plain HTTP (no padlock). Anyone on the network can see the page and anything typed into it.` });
+      }
+      // (b) insecure legacy protocols in use
+      if (proto === 'telnet' || dPort === '23') this._addAnomaly('proto-telnet|' + srcIP + '|' + dstIP, { t, type: 'insecure-protocol', severity: 'medium', title: 'Telnet in use (insecure)', detail: `${srcIP} is using Telnet to ${dstIP}. Telnet sends everything, including passwords, in plain text. It’s a common target for IoT malware.` });
+      if (proto === 'ftp' || dPort === '21') this._addAnomaly('proto-ftp|' + srcIP + '|' + dstIP, { t, type: 'insecure-protocol', severity: 'medium', title: 'FTP in use (insecure)', detail: `${srcIP} is using FTP to ${dstIP}. FTP is unencrypted — prefer SFTP/HTTPS.` });
+      // (c) risky service exposed to / from the public internet
+      const publicPeer = (isPrivateIP(srcIP) && dstIP && !isPrivateIP(dstIP) && !isNoise(dstIP)) ? dstIP
+        : (dstIP && isPrivateIP(dstIP) && srcIP && !isPrivateIP(srcIP) && !isNoise(srcIP)) ? srcIP : '';
+      const RISKY = { '445': 'File sharing (SMB)', '3389': 'Remote Desktop (RDP)', '5900': 'Screen sharing (VNC)', '23': 'Telnet', '135': 'Windows RPC', '139': 'NetBIOS' };
+      if (publicPeer && RISKY[dPort]) this._addAnomaly('expose|' + dPort + '|' + publicPeer, { t, type: 'exposed-service', severity: 'high', title: `${RISKY[dPort]} talking to the internet`, detail: `${RISKY[dPort]} traffic is crossing between your network and the public internet (${publicPeer}). On a home network this is unusual and risky — these services should stay local.` });
     }
 
     _detectService(p, srcIP, sPort) {
@@ -304,9 +371,17 @@
       this._arp.set(ip, mac);
     }
 
+    // Best label for an IP: its domain name, else a local device's name.
+    labelFor(ip) {
+      if (!ip) return '';
+      return this.ipNames.get(ip) || this._localName.get(ip) || '';
+    }
+
     snapshot() {
+      this._localName = new Map();
       const devices = Array.from(this.devices.values()).map((d) => {
         const id = C.identifyDevice(d);
+        if (d.local && id.confidence !== 'low') for (const ip of d.ips) this._localName.set(ip, id.name);
         return {
           ip: d.ip, mac: d.mac, vendor: id.vendor || '', hostname: d.hostname,
           name: id.name, icon: id.icon, type: id.type, confidence: id.confidence,
@@ -316,11 +391,14 @@
           firstSeen: d.firstSeen, lastSeen: d.lastSeen,
         };
       }).sort((a, b) => (a.local === b.local ? b.packets - a.packets : (a.local ? -1 : 1)));
+      // attach a friendly name (domain) to internet servers for the devices tab
+      for (const d of devices) if (!d.local) { const nm = this.ipNames.get(d.ip); if (nm) { d.name = nm; d.icon = '🌐'; } }
 
       const namedLocal = devices.filter((d) => d.local && d.confidence !== 'low');
       const services = Array.from(this.services.values());
       const servicesInUse = Array.from(this.servicePorts.values()).sort((a, b) => b.count - a.count).slice(0, 25);
       const distinctServices = new Set([...services.map((s) => s.service), ...servicesInUse.map((s) => s.service)]);
+      const insecureLogins = this.logins.filter((l) => !l.secure).length;
 
       return {
         totalPackets: this.totalPackets,
@@ -328,14 +406,15 @@
         durationSec: this.startTime ? (this.lastTime - this.startTime) : 0,
         counts: {
           devices: devices.filter((d) => d.local).length,
-          credentials: this.credentials.length,
+          credentials: this.logins.length,
           anomalies: this.anomalies.length,
           media: this.media.length,
           services: distinctServices.size,
         },
+        insecureLogins,
         devices,
         namedLocal,
-        credentials: this.credentials.slice().reverse(),
+        credentials: this.logins.slice().reverse(),
         anomalies: this.anomalies.slice().reverse(),
         media: this.media.slice().reverse(),
         services,

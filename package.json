@@ -1,7 +1,7 @@
 {
   "name": "packetpal",
   "productName": "PacketPal",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "A beginner-friendly window into your network — a friendly face over Wireshark's capture engine.",
   "author": "Aadhaar <aadhaarkoul2002@gmail.com>",
   "license": "MIT",

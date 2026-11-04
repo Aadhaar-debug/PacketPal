@@ -17,8 +17,8 @@ const esc = (s) => String(s == null ? '' : s)
 // Plain-English intros for each tab.
 const EXPLAIN = {
   devices: '<b>Who is on your network?</b> Every gadget — phones, laptops, TVs, smart bulbs — shows up here the moment it talks. PacketPal names each one from its maker (hardware address), the name it announces, and how it behaves (e.g. a device chatting with Apple’s servers is likely an Apple device). Modern phones hide behind a <b>random MAC</b>, so some show up as “private”.',
-  credentials: '<b>Is anything leaking your logins?</b> Secure sites (HTTPS) hide your passwords. Old or misconfigured services (plain HTTP, FTP, Telnet, old email) send them <b>in the clear</b>, where anyone on the network can read them. PacketPal flags these exposures so you can fix them — it does <b>not</b> store the actual passwords.',
-  anomalies: '<b>Anything suspicious?</b> PacketPal watches for tell-tale attack patterns — a device scanning lots of ports (hunting for open doors), or two devices fighting over one address (a classic man-in-the-middle trick).',
+  credentials: '<b>Everything to do with logins.</b> PacketPal logs sign-in activity across the network — the login <b>pages</b> opened, the login <b>services</b> connected to, and any credentials seen. Secure sign-ins (🔒 HTTPS) are normal. Anything <b>unencrypted</b> (🔓 plain HTTP, FTP, Telnet, old email) is risky — readable by anyone on the network. Passwords themselves are flagged but <b>never stored</b>.',
+  anomalies: '<b>Anything that shouldn’t happen on a home network.</b> PacketPal flags unencrypted web pages, insecure protocols (Telnet, FTP), risky services exposed to the internet (file sharing, remote desktop), port scans, and address spoofing (man-in-the-middle). Colour shows severity: 🚨 high, ⚠️ medium, ℹ️ worth knowing.',
   media: '<b>Pictures &amp; video crossing the wire.</b> When a device loads an image or video over an <b>unencrypted</b> connection, it is visible on the network. This shows what was sent and by whom. (Encrypted sites — most of the web — stay private and will not appear here.)',
   services: '<b>Open doors & services.</b> A “port” is a door into a device. <b>Open doors</b> are services your own devices are listening on (worth checking they’re meant to be open). <b>Services in use</b> shows what your network is reaching out to — web, DNS, email, video — so you can see the kinds of activity happening.',
   traffic: '<b>Everything, as it happens.</b> This is the raw feed in friendly language. Use the buttons below to zero in — they appear automatically as PacketPal discovers traffic, including <b>one button per device</b> so you can watch a single phone or laptop.',
@@ -146,7 +146,7 @@ function renderAll() {
   $('statTime').textContent = Math.round(s.durationSec) + 's';
 
   setCount('devices', s.counts.devices);
-  setCount('credentials', s.counts.credentials, true);
+  setCount('credentials', s.counts.credentials, s.insecureLogins > 0);
   setCount('anomalies', s.counts.anomalies, true);
   setCount('media', s.counts.media);
   setCount('services', s.counts.services);
@@ -214,24 +214,34 @@ function deviceRow(d, isLocal) {
 
 function renderCredentials(s) {
   const el = $('list-credentials');
-  if (!s.credentials.length) { el.innerHTML = emptyState('✅', 'No cleartext logins spotted. That is good — it means logins are staying encrypted.'); return; }
-  el.innerHTML = s.credentials.map((c) => `<div class="row danger">
-      <div class="av">🔓</div>
+  if (!s.credentials.length) { el.innerHTML = emptyState('🔑', capturing ? 'No login activity yet. Sign-ins, login pages and services will appear here as they happen.' : 'Press start to watch for login activity.'); return; }
+  const head = s.insecureLogins
+    ? `<div class="section-head" style="color:var(--red)">⚠️ ${fmt(s.insecureLogins)} insecure login${s.insecureLogins === 1 ? '' : 's'} (sent without encryption)</div>`
+    : `<div class="section-head">🔑 Login activity — all secure 🔒</div>`;
+  el.innerHTML = head + s.credentials.map((c) => {
+    const icon = c.secure ? '🔒' : '🔓';
+    const badge = c.secure ? `<span class="badge local">secure</span>` : `<span class="badge hi">unencrypted</span>`;
+    const where = c.host ? esc(c.host) + (c.path ? esc(c.path) : '') : '';
+    return `<div class="${c.secure ? 'row' : 'row danger'}">
+      <div class="av">${icon}</div>
       <div class="main">
-        <div class="title">${esc(c.summary)}<span class="badge hi">${esc(c.protocol)}</span></div>
-        <div class="sub mono">${esc(c.endpoints)}</div>
+        <div class="title">${esc(c.summary)} ${badge} <span class="badge ext">${esc(c.protocol)}</span></div>
+        ${where ? `<div class="sub mono">${where}</div>` : ''}
       </div>
       <div class="meta">${clock(c.t)}</div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
+const SEV_CLASS = { high: 'row danger', medium: 'row warn', low: 'row', info: 'row' };
+const SEV_ICON = { high: '🚨', medium: '⚠️', low: 'ℹ️', info: 'ℹ️' };
 function renderAnomalies(s) {
   const el = $('list-anomalies');
-  if (!s.anomalies.length) { el.innerHTML = emptyState('🛡️', 'Nothing unusual so far. PacketPal keeps watching for scans and spoofing.'); return; }
-  el.innerHTML = s.anomalies.map((a) => `<div class="row danger">
-      <div class="av">⚠️</div>
+  if (!s.anomalies.length) { el.innerHTML = emptyState('🛡️', capturing ? 'Nothing unusual so far. PacketPal is watching for plaintext browsing, insecure protocols, exposed services, scans and spoofing.' : 'Press start to watch for anything risky.'); return; }
+  el.innerHTML = s.anomalies.map((a) => `<div class="${SEV_CLASS[a.severity] || 'row'}">
+      <div class="av">${SEV_ICON[a.severity] || '⚠️'}</div>
       <div class="main">
-        <div class="title">${esc(a.title)}</div>
+        <div class="title">${esc(a.title)} <span class="badge ${a.severity === 'high' ? 'hi' : 'ext'}">${esc(a.severity)}</span></div>
         <div class="sub">${esc(a.detail)}</div>
       </div>
       <div class="meta">${clock(a.t)}</div>
@@ -303,6 +313,13 @@ function matchFilter(r) {
   return true;
 }
 
+// Show an IP with the domain / device name we've learned for it (IP never hidden).
+function endpointCell(ip, port) {
+  const name = store.labelFor(ip);
+  const portStr = port ? ':' + esc(port) : '';
+  return `<div class="mono">${esc(ip)}${portStr}</div>${name ? `<div class="ipname">${esc(name)}</div>` : ''}`;
+}
+
 function renderTraffic(s) {
   renderFilters(s);
   const rows = [];
@@ -318,8 +335,8 @@ function renderTraffic(s) {
       <td class="mono">${r.n}</td>
       <td>${clock(r.t)}</td>
       <td class="proto"><span>${esc(r.proto)}</span></td>
-      <td class="mono">${esc(r.src)}${r.sport ? ':' + esc(r.sport) : ''}</td>
-      <td class="mono">${esc(r.dst)}${r.dport ? ':' + esc(r.dport) : ''}</td>
+      <td>${endpointCell(r.src, r.sport)}</td>
+      <td>${endpointCell(r.dst, r.dport)}</td>
       <td title="${esc(r.info)}">${esc(r.info)}</td>
     </tr>`).join('')}</tbody></table>`;
 }

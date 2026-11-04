@@ -93,7 +93,8 @@ class CaptureSession extends EventEmitter {
       '-N', 'm',       // ...but DO resolve MAC vendors from tshark's IEEE database
       '-T', 'fields',
       '-E', 'separator=/t',
-      '-E', 'occurrence=f',
+      '-E', 'occurrence=a',   // list ALL values of a field (e.g. every DNS A record), comma-joined
+      '-E', 'aggregator=,',
       '-E', 'quote=n',
       ...fieldArgs(),
     ];
